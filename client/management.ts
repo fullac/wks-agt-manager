@@ -23,7 +23,7 @@ export function workspaceMenus(client: PluginClientContext) {
     dialog?.close();
     const d = document.createElement('dialog'); d.className = 'wm-dialog'; paint(d);
     const title = document.createElement('strong');
-    title.textContent = destination ? '移动到项目' : 'Workspace & Agent Manager';
+    title.textContent = destination ? '移动到项目' : 'wks-agt-manager';
     const header = document.createElement('header');
     const close = button('', () => d.close()); close.setAttribute('aria-label','关闭');
     close.append(icon('close')); header.append(title, close);
@@ -191,7 +191,7 @@ export function workspaceMenus(client: PluginClientContext) {
       move.onpointerleave = leave;
       move.onkeydown = e => { if (e.key === 'ArrowRight') { e.preventDefault(); projects(wid,move,paint,true); } };
       const manage = button('', () => { flyout?.close(); open(wid,paint); });
-      manage.append(icon('manage'),'Workspace & Agent Manager'); manage.onpointerenter = () => flyout?.close();
+      manage.append(icon('manage'),'wks-agt-manager'); manage.onpointerenter = () => flyout?.close();
       const rows = [move, manage];
       for (const b of rows) {
         paint(b); b.className = 'wm-row'; b.setAttribute('role','menuitem');

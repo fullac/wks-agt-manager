@@ -3,6 +3,6 @@
   "requirements": {
     "paseo": ">=0.17.3"
   },
-  "name": "Workspace & Agent Manager",
+  "name": "wks-agt-manager",
   "description": "移动工作区、释放和重新导入 Agent，并按来源查看子 Agent。"
 }

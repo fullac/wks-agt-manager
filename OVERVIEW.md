@@ -1,6 +1,6 @@
-# Workspace & Agent Manager
+# wks-agt-manager
 
-在工作区的右键菜单中选择「移动到项目」，选定目标后查看改动预览。「Workspace & Agent Manager」提供工作区移除、单个 Agent 释放、操作记录和重新导入。
+在工作区的右键菜单中选择「移动到项目」，选定目标后查看改动预览。「wks-agt-manager」提供工作区移除、单个 Agent 释放、操作记录和重新导入。
 
 | 操作 | 实际改动 |
 |---|---|
