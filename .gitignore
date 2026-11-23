@@ -1,0 +1,7 @@
+# 排除本机依赖、缓存与环境配置。
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
