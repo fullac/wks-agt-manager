@@ -47,6 +47,17 @@ class RegistryTest(unittest.TestCase):
         self.write("agent-requests/other.json",dict(agentId="else"))
         self.before = self.snapshot()
 
+    def test_settings_history_without_workspace(self):
+        rows = r.read(self.home / r.WORKSPACES)
+        self.write(r.WORKSPACES, [rows[0], {**rows[1], "archivedAt": "archived"}])
+        before = self.snapshot()
+        history = r.request(self.home, {"op": "history", "host": "self"})
+        self.assertEqual(history["destinations"], [{"id": "wks_1", "name": "old / source"}])
+        self.assertEqual(history["jobs"], [])
+        self.assertEqual(before, self.snapshot())
+        self.write(r.WORKSPACES, [])
+        self.assertEqual(r.request(self.home, {"op": "history", "host": "self"})["destinations"], [])
+
     def write(self, name, value):
         r.atomic(self.home / name, value if isinstance(value, bytes) else r.encoded(value))
 

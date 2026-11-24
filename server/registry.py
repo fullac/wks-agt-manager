@@ -310,7 +310,7 @@ def wake(home):
 def request(home, data):
     if data["host"] != (home / "server-id").read_text().strip():
         raise ValueError("菜单与后台主机不一致")
-    wid = data["workspace"]
+    wid = data.get("workspace") if data["op"] == "history" else data["workspace"]
     root = home / AREA
     if data["op"] in ("history", "import-info"):
         jobs, sessions = [], {}
@@ -324,7 +324,12 @@ def request(home, data):
         bound = {(a["provider"], (a.get("persistence") or {}).get("sessionId")): a for _, a in records(home)}
         available = [a for a in sessions.values() if (a["provider"], a["session"]) not in bound]
         if data["op"] == "history":
-            return {"jobs": jobs, "released": available}
+            projects = {p["projectId"]: p.get("customName") or p["displayName"]
+                        for p in read(home / "projects/projects.json")}
+            destinations = [{"id": w["workspaceId"], "name": " / ".join(filter(None, [
+                projects.get(w["projectId"]), w.get("title") or w["displayName"]]))}
+                for w in read(home / WORKSPACES) if not w.get("archivedAt")]
+            return {"jobs": jobs, "released": available, "destinations": destinations}
         w = next((w for w in read(home / WORKSPACES) if w["workspaceId"] == wid and not w.get("archivedAt")), None)
         session = sessions.get(data["target"])
         if not w or not session or not Path(w["cwd"]).is_dir():

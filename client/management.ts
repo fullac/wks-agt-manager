@@ -9,6 +9,9 @@ export function workspaceMenus(client: PluginClientContext) {
   const mounted = new Map<Element, HTMLElement[]>();
   let host = '', stopped = false;
   let dialog: HTMLDialogElement | null = null;
+  function dismissDialog() {
+    if (dialog) { dialog.close(); dialog.remove(); dialog = null; }
+  }
   const css = document.createElement('style'); css.textContent = menuCss; document.head.append(css);
   const button = (name: string, click: () => void) => {
     const b = document.createElement('button');
@@ -19,80 +22,112 @@ export function workspaceMenus(client: PluginClientContext) {
     return client.rpc(management, {workspace: wid, host, ...q});
   }
   type Preview = {kind: 'move'|'release'|'remove'; target: string; title: string};
-  function open(wid: string, paint: ReturnType<typeof readMenuStyle>, operation?: Preview) {
-    dialog?.close();
-    const d = document.createElement('dialog'); d.className = 'wm-dialog'; paint(d);
-    const title = document.createElement('strong');
-    title.textContent = operation?.title ?? '操作记录与重新导入';
+  function open(wid: string, paint: ReturnType<typeof readMenuStyle>, operation: Preview) {
+    dismissDialog();
+    const d = document.createElement('dialog');
+    d.className = 'wm-dialog';
+    paint(d);
+    const {kind, target} = operation;
+    const removing = kind !== 'move';
+    const title = document.createElement('h2');
+    title.textContent = removing ? operation.title : '移动到项目';
+    title.id = 'wm-dialog-title';
+    d.setAttribute('aria-labelledby', title.id);
     const header = document.createElement('header');
-    const close = button('', () => d.close()); close.setAttribute('aria-label','关闭');
-    close.append(icon('close')); header.append(title, close);
-    const content = document.createElement('section');
-    d.append(header, content); d.setAttribute('aria-label', title.textContent);
-    d.onclose = () => { d.remove(); if (dialog === d) dialog = null; };
-    document.body.append(d); dialog = d; d.showModal();
-    const request = (q: Omit<Query, 'workspace'|'host'>) => rpc(wid, q);
-    content.textContent = '正在读取…';
-    function action(label: string, fn: () => Promise<void>) {
-      return button(label, () => { content.textContent = '正在读取…'; void fn().catch(error => {
-        content.textContent = error instanceof Error ? error.message : String(error);
-      }); });
+    const close = button('', () => d.close());
+    close.setAttribute('aria-label', '关闭');
+    close.append(icon('close'));
+    header.append(title, close);
+
+    const body = document.createElement('section');
+    const footer = document.createElement('footer');
+    const cancel = button('取消', () => d.close());
+    const confirm = button(removing ? '确认移除并加入队列' : '确认移动并加入队列', () => {});
+    confirm.className = 'wm-primary';
+    confirm.disabled = true;
+    footer.append(cancel, confirm);
+    d.append(header, body, footer);
+    document.body.append(d);
+    dialog = d;
+    const reveal = () => { if (d.isConnected && !d.open) { d.showModal(); cancel.focus(); } };
+    const delay = window.setTimeout(reveal, 180);
+    d.onclose = () => { clearTimeout(delay); d.remove(); if (dialog === d) dialog = null; };
+    function line(text: string, className: string) {
+      const p = document.createElement('p');
+      p.textContent = text; p.className = className;
+      return p;
     }
-    async function preview(kind: 'move'|'release'|'remove', target: string, label: string) {
-      const args = {action: kind, target};
-      const p = await request({op: 'preview', ...args});
-      const name = kind === 'release' ? p.released?.find(a => a.id === target)?.title : p.workspace;
-      title.textContent = kind === 'move' ? label : label + '「' + (name || target || wid) + '」？';
-      d.setAttribute('aria-label', title.textContent);
-      const summary = document.createElement('div');
-      summary.textContent = (p.details || []).join(' ');
-      const files = document.createElement('details');
-      const f = document.createElement('summary'); f.textContent = '查看 ' + p.files!.length + ' 个登记文件';
-      const names = document.createElement('pre'); names.style.whiteSpace = 'pre-wrap';
-      names.style.overflowWrap = 'anywhere'; names.textContent = p.files!.join('\n');
-      files.append(f, names);
-      content.replaceChildren(summary);
-      for (const a of p.released || []) {
-        const row = document.createElement('div'); row.textContent = a.provider + ' · ' + a.title; content.append(row);
+    function status(text: string, loading = false) {
+      const item = line(text, loading ? 'wm-status wm-loading' : 'wm-status');
+      item.setAttribute('role', 'status');
+      body.replaceChildren(item);
+    }
+    function disclosure(label: string, list: HTMLElement) {
+      const detail = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.append(icon('next'), label);
+      detail.append(summary, list);
+      return detail;
+    }
+    function failed(error: unknown) {
+      status(error instanceof Error ? error.message : String(error));
+      footer.replaceChildren(button('关闭', () => d.close()));
+    }
+    status('正在核对影响范围…', true);
+    void rpc(wid, {op:'preview', action:kind, target}).then(p => {
+      if (dialog !== d || !d.isConnected) return;
+      const released = p.released ?? [];
+      const files = p.files ?? [];
+      const agent = released.find(a => a.id === target);
+      const subject = kind === 'move' ? operation.title : agent?.title ?? p.workspace ?? target;
+      const caption = kind === 'release' ? agent?.provider : undefined;
+      const subjectRow = document.createElement('div');
+      subjectRow.className = 'wm-subject';
+      subjectRow.append(icon(kind === 'release' ? 'agent' : 'folder'), line(subject, 'wm-name'));
+      if (caption) subjectRow.append(line(caption, 'wm-provider'));
+      const impact = kind === 'remove' ? '从 Paseo 移除此工作区，保留工作树、项目文件和原生会话。'
+        : kind === 'release' ? '解除此 Agent 的 Paseo 登记，保留原生会话，可重新导入。'
+        : '工作区将归入目标项目，目录和 Agent 保持原样。';
+      body.replaceChildren(subjectRow, line(impact, 'wm-impact'));
+      // 父级引用等额外改动在确认前可见，通用的保留说明已由上方的操作文案呈现。
+      for (const note of p.details ?? []) {
+        if (note.startsWith('保留工作树、项目文件及原生会话；') || note.startsWith('只改该工作区的 projectId，')) continue;
+        body.append(line(note, 'wm-impact'));
       }
-      const timing = document.createElement('p');
-      timing.textContent = '确认后排队，Paseo 后台下次停止时执行。原始登记会备份，可在操作记录查看结果。';
-      const cancel = button('取消', () => d.close());
-      content.append(files, timing, cancel, action(kind === 'move' ? '确认并加入队列' : '确认移除并加入队列', async () => {
-        const result = await request({op: 'submit', ...args, token: p.token!});
-        content.textContent = '已排队，等待 Paseo 后台停止。';
-        content.append(action('取消排队', async () => {
-          await request({op: 'cancel', target: result.id}); content.textContent = '已取消';
-        }));
-      }));
-    }
-    async function history() {
-      const h = await request({op: 'history'});
-      title.textContent = '操作记录与重新导入'; content.replaceChildren();
-      for (const j of h.jobs || []) {
-        const row = document.createElement('div');
-        const states: Record<string,string> = {queued:'等待后台停止', applying:'执行中', done:'已完成', error:'失败', cancelled:'已取消'};
-        row.textContent = [j.name, states[j.state], j.error].filter(Boolean).join(' · ');
-        const detail = document.createElement('details');
-        const heading = document.createElement('summary'); heading.textContent = '本机操作记录';
-        detail.append(heading, document.createTextNode('~/.paseo/plugin-data/subagent-groups/management/' + j.id + '/'));
-        row.append(detail);
-        if (j.state === 'queued' && j.workspace === wid) row.append(action('取消', async () => {
-          await request({op:'cancel',target:j.id}); await history();
-        }));
-        content.append(row);
+      const group = document.createElement('div');
+      group.className = 'wm-details';
+      if (kind === 'remove' && released.length) {
+        const list = document.createElement('ul');
+        for (const a of released) {
+          const row = document.createElement('li');
+          row.append(line(a.title, 'wm-agent-name'), line(a.provider, 'wm-provider'));
+          list.append(row);
+        }
+        group.append(disclosure('将释放的 Agent（' + released.length + '）', list));
       }
-      for (const a of h.released || []) content.append(action('导入到此工作区 · ' + a.title, async () => {
-        title.textContent = '导入到此工作区'; content.textContent = a.provider + ' · ' + a.title;
-        content.append(action('确认导入', async () => {
-          const result = await request({op:'import', target:a.id});
-          content.textContent = '已导入 · ' + result.id;
-        }));
-      }));
-      if (!content.childElementCount) content.textContent = '暂无操作记录';
-    }
-    const load = operation ? preview(operation.kind, operation.target, operation.title) : history();
-    void load.catch(e => { content.textContent = String(e); });
+      const paths = document.createElement('pre');
+      paths.textContent = files.join('\n');
+      group.append(disclosure('涉及的登记文件（' + files.length + '）', paths));
+      body.append(group, line('Paseo 后台下次停止时备份并执行。', 'wm-timing'));
+      confirm.disabled = false;
+      confirm.onclick = async () => {
+        if (confirm.disabled) return;
+        confirm.disabled = true;
+        try {
+          const result = await rpc(wid, {op:'submit', action:kind, target, token:p.token!});
+          title.textContent = '已加入队列';
+          status('Paseo 后台下次停止时执行。可在插件设置中查看记录。');
+          const undo = button('取消排队', async () => {
+            undo.disabled = true;
+            try {
+              await rpc(wid, {op:'cancel', target:result.id});
+              title.textContent = '已取消排队'; status('登记未更改。'); undo.remove();
+            } catch (e) { failed(e); }
+          });
+          footer.replaceChildren(undo, button('完成', () => d.close()));
+        } catch (e) { failed(e); }
+      };
+    }).catch(failed).finally(() => { clearTimeout(delay); if (dialog === d) reveal(); });
   }
   let flyout: {panel: HTMLElement; anchor: HTMLElement; close: () => void} | null = null;
   let leaveTimer = 0;
@@ -147,7 +182,7 @@ export function workspaceMenus(client: PluginClientContext) {
       panel.replaceChildren();
       for (const p of c.projects || []) {
         const current = p.id === c.project;
-        const b = button('', () => { close(); open(wid,paint,{kind:'move', target:p.id, title:'移动「' + c.workspace + '」到「' + p.name + '」'}); });
+        const b = button('', () => { close(); open(wid,paint,{kind:'move', target:p.id, title:c.workspace + ' → ' + p.name}); });
         b.className = 'wm-option'; b.disabled = current; b.title = p.name;
         b.setAttribute('role','menuitemradio'); b.setAttribute('aria-checked',String(current));
         const label = document.createElement('span'); label.textContent = p.name;
@@ -244,15 +279,12 @@ export function workspaceMenus(client: PluginClientContext) {
       move.onpointerenter = e => { if (e.pointerType !== 'touch') projects(wid,move,paint,false); };
       move.onpointerleave = leave;
       move.onkeydown = e => { if (e.key === 'ArrowRight') { e.preventDefault(); projects(wid,move,paint,true); } };
-      const manage = button('', () => { flyout?.close(); open(wid,paint); });
-      manage.append(icon('manage'),'操作记录与重新导入'); manage.onpointerenter = () => flyout?.close();
-      const rows = [move, manage];
-      for (const b of rows) insertRow(labels, branch, b);
-      mounted.set(labels, rows);
+      insertRow(labels, branch, move);
+      mounted.set(labels, [move]);
     }
   }
   const observer = new MutationObserver(render);
   observer.observe(document.body, {childList:true, subtree:true});
   void client.rpc(identity, {}).then(id => { host = id; render(); }).catch(console.error);
-  return () => { stopped = true; observer.disconnect(); document.removeEventListener('contextmenu', rememberTab, true); flyout?.close(); stay(); dialog?.close(); css.remove(); for (const rows of mounted.values()) rows.forEach(b => b.remove()); mounted.clear(); };
+  return () => { stopped = true; observer.disconnect(); document.removeEventListener('contextmenu', rememberTab, true); flyout?.close(); stay(); dismissDialog(); css.remove(); for (const rows of mounted.values()) rows.forEach(b => b.remove()); mounted.clear(); };
 }
