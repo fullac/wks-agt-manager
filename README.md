@@ -13,7 +13,19 @@ npm test
 paseo plugin install "$PWD"
 ```
 
-Right-click a workspace to move or remove it. To remove a single agent, right-click its tab. Both removal actions show a preview and require confirmation. Open the plugin settings to review queued operations or reimport a released session into a workspace.
+### Upgrading from `subagent-groups`
+
+Let any queued operations finish or cancel them in the old plugin settings. Disable the old plugin with `paseo plugin disable subagent-groups`, then install this checkout using the commands above. Open **Settings → Plugins → wks-agt-manager** and verify your operation history before running `paseo plugin remove subagent-groups`. The plugin moves existing requests, results, and backups to its new data directory. If both history directories already exist, it reports a conflict and leaves both in place.
+
+## Usage
+
+| Action | Where to find it |
+| --- | --- |
+| Move a workspace | Right-click the workspace in the sidebar, choose **Move to project**, then select the destination. |
+| Remove a workspace and release its agents | Right-click the workspace and choose **Remove workspace** above **Archive**. Expand the preview to see which agents and registration files it affects. |
+| Release one agent | Right-click its tab and choose **Remove agent** above **Close**. Hover over the action for a description. |
+
+Review the preview and confirm to queue a move or removal. In **Settings → Plugins → wks-agt-manager**, expand a history entry to see its local directory or cancel a queued operation. To reimport a released session, select the session and the destination workspace, then confirm the import.
 
 ## How it works
 
