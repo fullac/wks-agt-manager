@@ -13,7 +13,7 @@ npm test
 paseo plugin install "$PWD"
 ```
 
-Right-click a workspace to preview a move or open **wks-agt-manager** to release a workspace or agent.
+Right-click a workspace to move or remove it. To remove a single agent, right-click its tab. Both removal actions show a preview and require confirmation. The workspace menu also provides operation history and reimport.
 
 ## How it works
 

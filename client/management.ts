@@ -1,6 +1,6 @@
 // 在工作区右键菜单加入项目选择和登记管理，所有改动先展示实际范围。
 import type { PluginClientContext } from '@getpaseo/plugin/client';
-import { icon, menuCss, readMenuStyle } from './menu-appearance';
+import { attachRemovalHint, icon, menuCss, readMenuStyle } from './menu-appearance';
 import { identity, management, type Query } from '../shared/management';
 
 export function workspaceMenus(client: PluginClientContext) {
@@ -18,12 +18,12 @@ export function workspaceMenus(client: PluginClientContext) {
   function rpc(wid: string, q: Omit<Query, 'workspace'|'host'>) {
     return client.rpc(management, {workspace: wid, host, ...q});
   }
-  type Destination = {id: string; name: string; workspace: string};
-  function open(wid: string, paint: ReturnType<typeof readMenuStyle>, destination?: Destination) {
+  type Preview = {kind: 'move'|'release'|'remove'; target: string; title: string};
+  function open(wid: string, paint: ReturnType<typeof readMenuStyle>, operation?: Preview) {
     dialog?.close();
     const d = document.createElement('dialog'); d.className = 'wm-dialog'; paint(d);
     const title = document.createElement('strong');
-    title.textContent = destination ? '移动到项目' : 'wks-agt-manager';
+    title.textContent = operation?.title ?? '操作记录与重新导入';
     const header = document.createElement('header');
     const close = button('', () => d.close()); close.setAttribute('aria-label','关闭');
     close.append(icon('close')); header.append(title, close);
@@ -32,6 +32,7 @@ export function workspaceMenus(client: PluginClientContext) {
     d.onclose = () => { d.remove(); if (dialog === d) dialog = null; };
     document.body.append(d); dialog = d; d.showModal();
     const request = (q: Omit<Query, 'workspace'|'host'>) => rpc(wid, q);
+    content.textContent = '正在读取…';
     function action(label: string, fn: () => Promise<void>) {
       return button(label, () => { content.textContent = '正在读取…'; void fn().catch(error => {
         content.textContent = error instanceof Error ? error.message : String(error);
@@ -40,7 +41,9 @@ export function workspaceMenus(client: PluginClientContext) {
     async function preview(kind: 'move'|'release'|'remove', target: string, label: string) {
       const args = {action: kind, target};
       const p = await request({op: 'preview', ...args});
-      title.textContent = label;
+      const name = kind === 'release' ? p.released?.find(a => a.id === target)?.title : p.workspace;
+      title.textContent = kind === 'move' ? label : label + '「' + (name || target || wid) + '」？';
+      d.setAttribute('aria-label', title.textContent);
       const summary = document.createElement('div');
       summary.textContent = (p.details || []).join(' ');
       const files = document.createElement('details');
@@ -54,7 +57,8 @@ export function workspaceMenus(client: PluginClientContext) {
       }
       const timing = document.createElement('p');
       timing.textContent = '确认后排队，Paseo 后台下次停止时执行。原始登记会备份，可在操作记录查看结果。';
-      content.append(files, timing, action('确认并加入队列', async () => {
+      const cancel = button('取消', () => d.close());
+      content.append(files, timing, cancel, action(kind === 'move' ? '确认并加入队列' : '确认移除并加入队列', async () => {
         const result = await request({op: 'submit', ...args, token: p.token!});
         content.textContent = '已排队，等待 Paseo 后台停止。';
         content.append(action('取消排队', async () => {
@@ -87,17 +91,8 @@ export function workspaceMenus(client: PluginClientContext) {
       }));
       if (!content.childElementCount) content.textContent = '暂无操作记录';
     }
-    if (destination) {
-      void preview('move', destination.id, '移动「' + destination.workspace + '」到「' + destination.name + '」')
-        .catch(e => { content.textContent = String(e); });
-      return;
-    }
-    void request({op:'catalog'}).then(c => {
-        content.append(action('移除此工作区并释放 Agent', () => preview('remove', '', '移除「' + c.workspace + '」')));
-        for (const a of c.agents || []) content.append(action('移除 Agent · ' + a.name,
-          () => preview('release', a.id, '释放「' + a.name + '」')));
-        content.append(action('操作记录与重新导入', history));
-    }).catch(e => { content.textContent = String(e); });
+    const load = operation ? preview(operation.kind, operation.target, operation.title) : history();
+    void load.catch(e => { content.textContent = String(e); });
   }
   let flyout: {panel: HTMLElement; anchor: HTMLElement; close: () => void} | null = null;
   let leaveTimer = 0;
@@ -152,7 +147,7 @@ export function workspaceMenus(client: PluginClientContext) {
       panel.replaceChildren();
       for (const p of c.projects || []) {
         const current = p.id === c.project;
-        const b = button('', () => { close(); open(wid,paint,{...p, workspace:c.workspace!}); });
+        const b = button('', () => { close(); open(wid,paint,{kind:'move', target:p.id, title:'移动「' + c.workspace + '」到「' + p.name + '」'}); });
         b.className = 'wm-option'; b.disabled = current; b.title = p.name;
         b.setAttribute('role','menuitemradio'); b.setAttribute('aria-checked',String(current));
         const label = document.createElement('span'); label.textContent = p.name;
@@ -163,12 +158,71 @@ export function workspaceMenus(client: PluginClientContext) {
       place(); if (focus) panel.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
     }).catch(e => { panel.textContent = String(e); place(); });
   }
+  function insertRow(anchor: HTMLElement, before: HTMLElement, row: HTMLButtonElement) {
+    readMenuStyle(anchor)(row);
+    row.className = 'wm-row';
+    row.setAttribute('role', 'menuitem');
+    row.dataset.menuItem = 'true';
+    row.dataset.menuDisabled = 'false';
+    row.tabIndex = anchor.tabIndex;
+    row.addEventListener('click', e => e.stopPropagation());
+    before.before(row);
+  }
+
+  const tabPrefix = 'workspace-tab-agent_';
+  let invokedAgent: string | undefined;
+  function rememberTab(event: Event) {
+    const tab = event.target instanceof Element && event.target.closest<HTMLElement>('[data-testid^="workspace-tab-agent_"]');
+    invokedAgent = tab ? tab.dataset.testid!.slice(tabPrefix.length) : undefined;
+  }
+  document.addEventListener('contextmenu', rememberTab, true);
+
+  function addRemovals() {
+    const selector = '[data-testid^="sidebar-workspace-menu-archive-"],' +
+      '[data-testid^="workspace-tab-context-"][data-testid$="-close"],' +
+      '[data-testid^="workspace-tab-menu-"][data-testid$="-close"]';
+    for (const anchor of document.querySelectorAll<HTMLElement>(selector)) {
+      if (mounted.has(anchor)) continue;
+      const id = anchor.dataset.testid!;
+      const archive = 'sidebar-workspace-menu-archive-';
+      let wid: string, operation: Preview;
+      if (id.startsWith(archive)) {
+        if (!id.startsWith(archive + host + ':')) continue;
+        wid = id.slice((archive + host + ':').length);
+        operation = {kind: 'remove', target: '', title: '移除工作区'};
+      } else {
+        const route = (location.pathname + location.hash).match(/\/h\/([^/]+)\/workspace\/(wks_[\w-]+)(?:[/?#]|$)/);
+        if (!route || route[1] !== host) continue;
+        wid = route[2];
+        const base = id.slice(0, -'-close'.length);
+        const surface = anchor.closest('[data-menu-surface], [role="menu"], [role="dialog"]') || anchor.parentElement;
+        const copy = surface?.querySelector('[data-testid="' + CSS.escape(base + '-copy-agent-id') + '"]');
+        if (!copy) continue;
+        const tabId = base.replace(/^workspace-tab-(context|menu)-/, '');
+        const target = tabId.startsWith('agent_') ? tabId.slice('agent_'.length) : invokedAgent;
+        // 已打开的草稿可能沿用旧标签 ID，以右键命中的 Agent 和菜单显示的短 ID 交叉核对。
+        if (!target || !Array.from(copy.querySelectorAll('*')).some(el =>
+          !el.childElementCount && el.textContent?.trim() === target.slice(0, 7))) continue;
+        operation = {kind: 'release', target, title: '移除 Agent'};
+      }
+      if (!/^wks_[\w-]+$/.test(wid)) continue;
+      const paint = readMenuStyle(anchor);
+      const row = button('', () => { flyout?.close(); open(wid, paint, operation); });
+      row.append(icon('remove'), operation.title);
+      insertRow(anchor, anchor, row);
+      if (operation.kind === 'release') {
+        attachRemovalHint(row);
+      }
+      mounted.set(anchor, [row]);
+    }
+  }
   function render() {
     if (stopped || !host) return;
     for (const [key, rows] of mounted) if (!key.isConnected) {
       if (flyout && rows.includes(flyout.anchor)) flyout.close();
       rows.forEach(b => b.remove()); mounted.delete(key);
     }
+    addRemovals();
     for (const labels of document.querySelectorAll<HTMLElement>('[data-testid^="' + prefix + '"]')) {
       if (mounted.has(labels)) continue;
       const key = labels.dataset.testid!.slice(prefix.length);
@@ -191,18 +245,14 @@ export function workspaceMenus(client: PluginClientContext) {
       move.onpointerleave = leave;
       move.onkeydown = e => { if (e.key === 'ArrowRight') { e.preventDefault(); projects(wid,move,paint,true); } };
       const manage = button('', () => { flyout?.close(); open(wid,paint); });
-      manage.append(icon('manage'),'wks-agt-manager'); manage.onpointerenter = () => flyout?.close();
+      manage.append(icon('manage'),'操作记录与重新导入'); manage.onpointerenter = () => flyout?.close();
       const rows = [move, manage];
-      for (const b of rows) {
-        paint(b); b.className = 'wm-row'; b.setAttribute('role','menuitem');
-        b.dataset.menuItem = 'true'; b.dataset.menuDisabled = 'false'; b.tabIndex = labels.tabIndex;
-        b.addEventListener('click',e => e.stopPropagation()); branch.before(b);
-      }
+      for (const b of rows) insertRow(labels, branch, b);
       mounted.set(labels, rows);
     }
   }
   const observer = new MutationObserver(render);
   observer.observe(document.body, {childList:true, subtree:true});
   void client.rpc(identity, {}).then(id => { host = id; render(); }).catch(console.error);
-  return () => { stopped = true; observer.disconnect(); flyout?.close(); stay(); dialog?.close(); css.remove(); for (const rows of mounted.values()) rows.forEach(b => b.remove()); mounted.clear(); };
+  return () => { stopped = true; observer.disconnect(); document.removeEventListener('contextmenu', rememberTab, true); flyout?.close(); stay(); dialog?.close(); css.remove(); for (const rows of mounted.values()) rows.forEach(b => b.remove()); mounted.clear(); };
 }
