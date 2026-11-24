@@ -17,8 +17,41 @@ import uuid
 from pathlib import Path
 
 WORKSPACES = Path("projects/workspaces.json")
-AREA = Path("plugin-data/subagent-groups/management")
+AREA = Path("plugin-data/wks-agt-manager/management")
+LEGACY_AREA = Path("plugin-data/subagent-groups/management")
 UUID = re.compile(r"[0-9a-fA-F-]{36}\Z")
+
+
+def migrate_management(home):
+    old, new = home / LEGACY_AREA, home / AREA
+    if not old.exists():
+        return
+    # 跨进程串行迁移；旧版本的执行与入队进程继续使用原有两把锁。
+    parent_fd = os.open(old.parent.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(parent_fd, fcntl.LOCK_EX)
+        if not old.exists():
+            return
+        if new.exists() or new.is_symlink():
+            raise ValueError("新旧操作记录目录同时存在，请核对后合并")
+        if old.resolve() != old or new.parent.resolve() != new.parent:
+            raise ValueError("操作记录路径经过符号链接")
+        with (old / "worker.lock").open("a") as worker, (old / "queue.lock").open("a") as queue:
+            fcntl.flock(worker, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(queue, fcntl.LOCK_EX)
+            new.parent.mkdir(mode=0o700, exist_ok=True)
+            old.rename(new)
+            if not any(old.parent.iterdir()):
+                old.parent.rmdir()
+    finally:
+        os.close(parent_fd)
+
+
+def display_path(path):
+    try:
+        return str(Path("~") / path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
 
 
 def read(path):
@@ -316,7 +349,7 @@ def request(home, data):
         jobs, sessions = [], {}
         for path in pending_jobs(root):
             req, status = read(path), read(path.parent / "status.json")
-            jobs.append(dict(id=path.parent.name, workspace=req["cmd"]["workspace"],
+            jobs.append(dict(id=path.parent.name, directory=display_path(path.parent), workspace=req["cmd"]["workspace"],
                              name=req["preview"]["workspace"], action=req["cmd"]["action"], **status))
             if status["state"] == "done":
                 for a in req["preview"]["released"]:
@@ -379,6 +412,17 @@ if __name__ == "__main__":
         os.umask(0o077)
         mode, location = sys.argv[1:3]
         home = Path(location).resolve()
+        try:
+            migrate_management(home)
+        except BlockingIOError:
+            # 旧 worker 正在等后台退出；继续提供原队列的查询与取消，下次空闲时迁移。
+            if mode == "request":
+                data = json.load(sys.stdin)
+                if data["op"] in ("history", "cancel"):
+                    AREA = LEGACY_AREA
+                    print(json.dumps(request(home, data), ensure_ascii=False))
+                    sys.exit(0)
+            raise ValueError("旧队列仍在运行；完成或取消待办后将自动迁移操作记录")
         if mode == "worker":
             work(home)
         elif mode == "resume":

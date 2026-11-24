@@ -16,7 +16,7 @@ export const management = defineRpc({
     projects: z.array(z.object({id: z.string(), name: z.string()})).optional(),
     agents: z.array(z.object({id: z.string(), name: z.string(), provider: z.string()})).optional(),
     released: z.array(z.object({id: z.string(), title: z.string(), provider: z.string(), session: z.string()})).optional(),
-    jobs: z.array(z.object({action: z.string().optional(), id: z.string(), state: z.string(), name: z.string().optional(), error: z.string().optional(), workspace: z.string().optional()})).optional(),
+    jobs: z.array(z.object({directory: z.string(), action: z.string().optional(), id: z.string(), state: z.string(), name: z.string().optional(), error: z.string().optional(), workspace: z.string().optional()})).optional(),
     details: z.array(z.string()).optional(), files: z.array(z.string()).optional(),
     token: z.string().optional(), id: z.string().optional(), ok: z.boolean().optional(),
   }),

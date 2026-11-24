@@ -47,6 +47,20 @@ class RegistryTest(unittest.TestCase):
         self.write("agent-requests/other.json",dict(agentId="else"))
         self.before = self.snapshot()
 
+    def test_management_directory_migration(self):
+        old, new = self.home / r.LEGACY_AREA, self.home / r.AREA
+        job = old / "operation" / "before" / "workspaces.json"
+        self.write(job, b"original backup")
+        with (old / "worker.lock").open("a") as lock:
+            r.fcntl.flock(lock, r.fcntl.LOCK_EX)
+            with self.assertRaises(BlockingIOError):
+                r.migrate_management(self.home)
+            self.assertTrue(job.exists())
+        r.migrate_management(self.home)
+        r.migrate_management(self.home)
+        self.assertEqual((new / job.relative_to(old)).read_bytes(), b"original backup")
+        self.assertFalse(old.exists())
+
     def test_settings_history_without_workspace(self):
         rows = r.read(self.home / r.WORKSPACES)
         self.write(r.WORKSPACES, [rows[0], {**rows[1], "archivedAt": "archived"}])

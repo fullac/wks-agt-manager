@@ -9,8 +9,8 @@ import { identity, management } from './shared/management';
 export default function contribute(server: PluginServerContext) {
   const home = process.env.PASEO_HOME || join(homedir(), '.paseo');
   const config = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
-  const source = config.plugins?.['subagent-groups']?.path;
-  if (typeof source !== 'string') throw new Error('未找到本机 subagent-groups 插件目录');
+  const source = config.plugins?.['wks-agt-manager']?.path;
+  if (typeof source !== 'string') throw new Error('未找到本机 wks-agt-manager 插件目录');
   const worker = join(source, 'server', 'registry.py');
   function run(command: string, args: string[], input?: unknown): Promise<string> {
     return new Promise((resolve, reject) => {

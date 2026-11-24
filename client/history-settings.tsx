@@ -124,7 +124,7 @@ function History({host: {id: host}, theme: {colors}, layout}: PluginSurfaceProps
             {j.error && <Text accessibilityLiveRegion="polite" style={[styles.feedback, {color:colors.statusDanger}]}>{j.error}</Text>}
             {showDetails && <View style={[styles.detail, {borderTopColor:colors.border}]}>
               <Text style={[styles.small, muted]}>本机操作记录</Text>
-              <Text selectable style={[styles.path, {color:colors.foreground}]}>{'~/.paseo/plugin-data/subagent-groups/management/' + j.id + '/'}</Text>
+              <Text selectable style={[styles.path, {color:colors.foreground}]}>{j.directory + '/'}</Text>
             </View>}
             {j.state === 'queued' && j.workspace && <SettingsAction label="等待后台停止"
               actionLabel="取消排队" disabled={busy} onPress={() => void run('cancel', j.workspace!, j.id)} />}

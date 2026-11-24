@@ -19,4 +19,4 @@ Right-click a workspace to move or remove it. To remove a single agent, right-cl
 
 Paseo 0.17.3 has no plugin API for moving workspaces or releasing agents, so the plugin edits local registration files directly. A move updates the workspace's `projectId` in `~/.paseo/projects/workspaces.json`. A removal clears the selected registrations and related references while preserving project files and native session history. Reimport uses Paseo's native API.
 
-Paseo caches registrations in memory. After you confirm a move or removal, a worker waits for the daemon to stop, backs up the affected files, then applies and verifies the changes. Backups are stored under `~/.paseo/plugin-data/subagent-groups/management/<operation-id>/`.
+Paseo caches registrations in memory. After you confirm a move or removal, a worker waits for the daemon to stop, backs up the affected files, then applies and verifies the changes. Backups are stored under `~/.paseo/plugin-data/wks-agt-manager/management/<operation-id>/`.

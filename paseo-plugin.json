@@ -1,5 +1,5 @@
 {
-  "id": "subagent-groups",
+  "id": "wks-agt-manager",
   "requirements": {
     "paseo": ">=0.17.3"
   },
